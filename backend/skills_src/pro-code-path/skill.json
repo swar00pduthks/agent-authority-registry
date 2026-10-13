@@ -1,0 +1,9 @@
+{
+  "id": "pro-code-path",
+  "version": "1.0.0",
+  "kind": "path",
+  "label": "Pro-code",
+  "blurb": "SDK, tests and CI/CD",
+  "accent": "pro-code",
+  "owner": "AI Platform"
+}

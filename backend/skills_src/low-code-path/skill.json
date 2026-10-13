@@ -1,0 +1,9 @@
+{
+  "id": "low-code-path",
+  "version": "1.0.0",
+  "kind": "path",
+  "label": "Low-code",
+  "blurb": "Workflow canvas with light scripting",
+  "accent": "low-code",
+  "owner": "AI Platform"
+}
