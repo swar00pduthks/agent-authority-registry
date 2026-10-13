@@ -16,13 +16,13 @@ e2e/dynamic_flow.py         Playwright test of the full flow
 ```
 
 ## Commands
-Setup: `cd backend && pip install -r requirements.txt`; `cd frontend && npm ci`.
+Setup: `cd backend && pip install -r requirements.txt`; `cd frontend && npm ci`. Browser test only: `pip install -r e2e/requirements.txt`.
 
 | Task | Command (from repo root) |
 | --- | --- |
 | Security tests | `cd backend && python tests/test_registry_security.py` (expect `23/23 passed`) |
 | Types + build | `cd frontend && npm run build` |
-| Browser test | needs running stack and a fresh DB, see README "Test everything"; `python e2e/dynamic_flow.py` |
+| Browser test | needs running stack and a fresh DB, see README "Test everything"; `pip install -r e2e/requirements.txt && playwright install chromium`, then `python e2e/dynamic_flow.py` |
 | Whole stack | README "Run it", or `docker compose up --build` (compose is untested end to end) |
 
 Start order matters: MCP server, then `bootstrap`, then `seed`, then registry, then agent, then frontend.

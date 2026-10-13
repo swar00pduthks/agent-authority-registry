@@ -126,7 +126,7 @@ cd backend && rm -f registry.db* registry.signing.key .registry_tokens.json && r
 cd ../frontend && npm ci && npm run build
 LANGGRAPH_URL=http://127.0.0.1:2024 REGISTRY_URL=http://127.0.0.1:8800 npm run preview -- --port 4173 &
 # 3. run the browser test
-pip install playwright && playwright install chromium
+pip install -r e2e/requirements.txt && playwright install chromium
 cd .. && python e2e/dynamic_flow.py            # screenshots go to e2e/shots/shots/
 ```
 
