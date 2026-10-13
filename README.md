@@ -77,10 +77,10 @@ cp .env.example .env                          # add ANTHROPIC_API_KEY for the re
 
 redis-server --port 6390 &                    # optional
 export REDIS_URL=redis://127.0.0.1:6390/0
+python mcp_servers/standards_server.py &      # MCP server on :8810; start it BEFORE seeding (seed pins its tool digest)
 python -m registry_service.bootstrap          # writes .registry_tokens.json (alice=publisher, bob=approver, admin, agent-guide)
 python -m registry_service.seed               # skills, tools, UI map, profile #1 pinned in dev, uat, prod
 uvicorn registry_service.app:app --port 8800 &
-python mcp_servers/standards_server.py &      # MCP server on :8810
 
 curl -s localhost:8800/v1/signing-key -H "Authorization: Bearer $(jq -r '.["agent-guide"]' .registry_tokens.json)" | jq -r .public_key > registry_pubkey.pem
 export REGISTRY_TOKEN=$(jq -r '.["agent-guide"]' .registry_tokens.json)
@@ -102,6 +102,46 @@ Sign in to `/admin` with the tokens in `.registry_tokens.json`. Try: as alice pu
 Tests: `python tests/test_registry_security.py` (23 checks).
 
 Preview the panel with static data: `/?demo=empty|discover|plan|done`.
+
+## Test everything
+
+Run these after the services are up (see "Run it"). Each check says what a pass looks like.
+
+| Check | Command | Pass |
+| --- | --- | --- |
+| Registry security (no services needed) | `cd backend && python tests/test_registry_security.py` | `23/23 passed`. It uses its own temporary database. |
+| Frontend types and build | `cd frontend && npm ci && npm run build` | `tsc` prints nothing, then `built in ...s`. |
+| Registry is up | `curl -s localhost:8800/v1/health` | `{"ok":true,"bus":"redis",...}` (`"bus":"local"` without Redis). |
+| Agent is up | `curl -s localhost:2024/ok` | `{"ok":true}`. `curl -s localhost:2024/agent-config` returns the env, revision and UI map. |
+| MCP tool allow-list | `curl -s -X POST localhost:8800/v1/tools ...` as alice with a host outside `TOOL_HOST_ALLOWLIST` | HTTP 422 `MCP servers may only be on [...]`. |
+| Audit chain | Admin console, Activity tab, "Verify chain" (or `GET /v1/audit/verify`) | `Chain intact: N entries`. |
+| Full browser flow | see below | ends with `ERRORS: none` |
+
+**Full browser flow** (needs the scripted agent and a **fresh** database, because it publishes version 1.1.0 and revokes 1.0.0):
+
+```bash
+# 1. fresh state, then start redis (optional), MCP, bootstrap, seed, registry, agent as in "Run it"
+cd backend && rm -f registry.db* registry.signing.key .registry_tokens.json && rm -rf registry_cache skill_cache
+# 2. build and serve the frontend with the proxies pointing at your agent and registry
+cd ../frontend && npm ci && npm run build
+LANGGRAPH_URL=http://127.0.0.1:2024 REGISTRY_URL=http://127.0.0.1:8800 npm run preview -- --port 4173 &
+# 3. run the browser test
+pip install playwright && playwright install chromium
+cd .. && python e2e/dynamic_flow.py            # screenshots go to e2e/shots/shots/
+```
+
+It checks, in order: a chat pins low-code-path v1.0.0 on revision 1; alice (publisher) has no Approve button; bob approves 1.1.0; a new profile revision is pinned to dev; a new chat shows v1.1.0 on revision 2 with no restart; bob revokes 1.0.0; the older open chat keeps going on the new revision; the usage table lists the revisions and skills each chat ran; the audit chain verifies.
+
+**Try it by hand.** Sign in at `/admin` as alice (token in `backend/.registry_tokens.json`), publish a skill version, then sign in as bob in another browser profile and approve it. Create a profile revision on the Agents tab, approve it, pin it to dev, and start a new chat.
+
+**Troubleshooting**
+- `seed` fails with a connection error: the MCP server isn't running yet. Start it first.
+- Agent says `signature check failed`: `registry_pubkey.pem` is from an older database. Re-fetch it from `/v1/signing-key` after any reset.
+- `Port 2024 is already in use, using port N`: an old `langgraph` is still running. Stop it, or pass `--port` and set `LANGGRAPH_URL` to match.
+- `langgraph dev` crashes on `blockbuster`: keep `--allow-blocking` (development only).
+- Console shows `missing or invalid token`: the agent has no valid `REGISTRY_TOKEN`; use the `agent-guide` token from the current `.registry_tokens.json`.
+- The scripted agent follows one script per thread; for a fresh conversation click "Start over" in the route panel.
+- `python tests/test_registry_security.py` fails on import: run it from `backend/` with the requirements installed.
 
 ## Notes
 
