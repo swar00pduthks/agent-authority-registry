@@ -3,6 +3,8 @@
 Run: python mcp_servers/standards_server.py     (serves http://127.0.0.1:8810/mcp)
 It also exposes `delete_standard`, which the registry entry does NOT allow, to show an allowlist at work.
 """
+import os
+
 from mcp.server.mcpserver import MCPServer
 
 server = MCPServer("platform-standards")
@@ -33,4 +35,4 @@ def delete_standard(standard_id: str) -> str:
 
 
 if __name__ == "__main__":
-    server.run("streamable-http", host="127.0.0.1", port=8810)
+    server.run("streamable-http", host=os.getenv("MCP_HOST", "127.0.0.1"), port=int(os.getenv("MCP_PORT", "8810")))

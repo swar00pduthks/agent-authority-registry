@@ -49,7 +49,7 @@ from mcp import Client  # noqa: E402
 
 from .digest import tool_digest  # noqa: E402
 
-MCP_URL = "http://127.0.0.1:8810/mcp"
+MCP_URL = os.getenv("MCP_URL", "http://127.0.0.1:8810/mcp")
 ALLOW = ["list_standards", "get_standard"]
 
 

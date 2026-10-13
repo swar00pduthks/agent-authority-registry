@@ -52,7 +52,20 @@ frontend/src/admin/ admin console at /admin
 
 Prototype limits: SQLite is single-writer (use Postgres), the signing key is a file (use KMS/HSM), tokens are static (use OIDC or workload identity), and per-user entitlements are not enforced.
 
-## Run it
+## Run with Docker
+
+```bash
+docker compose up --build                    # scripted agent, no API key needed
+# real model: LANGGRAPH_CONFIG=langgraph.json ANTHROPIC_API_KEY=sk-... docker compose up --build
+```
+
+Open http://localhost:4173 for the chat and http://localhost:4173/admin for the console. Get console tokens with `docker compose exec registry cat /data/.registry_tokens.json` (alice publishes, bob approves). Services: `redis`, `registry-init` (bootstrap and seed, runs once), `registry` (:8800), `mcp` (demo MCP server), `agent` (LangGraph, :2024), `frontend` (:4173). The registry database and signing key live in the `registry-data` volume; `docker compose down -v` resets them.
+
+The compose setup was written without a Docker daemon available, so it has not been run end to end. The seed step, MCP host handling and environment overrides were checked natively; report anything that fails on first `up`.
+
+Design notes: [docs/design.md](docs/design.md).
+
+## Run it (without Docker)
 
 Needs Python 3.11+, Node 20+ and Redis (optional: without `REDIS_URL` the registry falls back to in-process invalidation).
 
