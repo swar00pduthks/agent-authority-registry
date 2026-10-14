@@ -47,7 +47,7 @@ The browser and the server only exchange messages. The agent never draws UI: it 
 
 **Welcome screen** has four suggested prompts and explains what happens next.
 
-**Quality floor.** Dark mode, bundled fonts (no external requests), visible focus, reduced-motion respected, native `details` for disclosure, a closed mobile sheet hidden from keyboard focus, and plain CSS with tokens.
+**Quality floor.** Dark mode, bundled fonts (no external requests), visible focus, reduced-motion respected, native `details` for disclosure, and a mobile dialog with focus trapping, Escape handling and an inert background.
 
 ## 4. Backend design decisions
 
@@ -60,13 +60,13 @@ The browser and the server only exchange messages. The agent never draws UI: it 
 - `collect_requirements(prefill)`: the form. Called exactly once, first.
 - `recommend_path(path, reason, requirements)`: validates the path name and returns a short note. Its arguments are what the panel renders; the return value is not used.
 - `ask_user(question, options)`: one interrupt per step that only the person can do.
-- `publish_file(path)`: checks the file is under `outputs/`, then returns `{type, name, mime, size, url}`.
+- `publish_file(path)`: checks the file is under this conversation's `outputs/`, then returns `{type, name, mime, size, signed url}`.
 
 **System prompt as a four-phase script.** Collect, recommend, publish the plan (read the skill and call `write_todos`), walk the steps. The strictest requirement wins when answers conflict.
 
 **Skills hold the steps.** One `SKILL.md` per path, with `[You]` and `[Agent]` prefixes. Adding or changing a path means editing a skill; the panel does not change.
 
-**Files.** The agent writes under `/outputs` with the built-in `write_file`, then calls `publish_file`. A small Starlette app, registered as the LangGraph `http.app`, serves that folder at `/files`.
+**Files.** The filesystem backend maps `/outputs` to a conversation-specific directory. `publish_file` returns a signed URL that expires after seven days; the Starlette app verifies it before serving files at `/files`.
 
 **Testing without an API key.** `dev/scripted_agent.py` is a fake chat model that streams scripted tool calls. The real graph, tools, skills and interrupts run, so the whole UI can be exercised and screenshotted.
 
@@ -77,8 +77,8 @@ The browser and the server only exchange messages. The agent never draws UI: it 
 | Agent loop, planning | `create_deep_agent`, built-in `write_todos`, file tools (`read_file`, `write_file`), sub-agents | System prompt, four custom tools |
 | Skills | Skills loading from a folder (`skills=["/skills/"]`) and reading `SKILL.md` | The three path skills and the `[You]` / `[Agent]` convention |
 | Human in the loop | `interrupt()` and resume through a command | The form payload (`kind: "form"`), the JSON-string resume contract, validation |
-| Server | `langgraph dev`, threads, runs, streaming, `http.app` hook | `webapp.py` that serves `/files` |
-| File access | `FilesystemBackend` with virtual paths | `publish_file` and the `/outputs` rule |
+| Server | `langgraph dev`, threads, runs, streaming, `http.app` hook | `webapp.py` that verifies signed `/files` URLs |
+| File access | `FilesystemBackend` with virtual paths | `ThreadFilesystemBackend` and signed `publish_file` URLs |
 | Chat runtime | `useLangGraphRuntime`, thread and message state, attachments adapter interface | `stream`, `create`, `load` callbacks; base64 file adapter with a 10 MB limit |
 | Chat UI | Thread, Message, Composer and Attachment primitives, `AuiIf`, markdown part | All markup and styling, welcome screen, suggested prompts, locked composer |
 | Tool rendering | `tools.by_name` and `Fallback` on message parts, tool-call args and result | `RequirementsToolUI`, `AskUserCard`, `ToolChip`; hiding `write_todos` and `recommend_path` in chat |
@@ -109,7 +109,7 @@ Rule of thumb: assistant-ui gives you the conversation and the hooks to reach th
 
 **Skills.** A `read_file` call on `/skills/<name>/SKILL.md` adds that skill to the panel.
 
-**Output files.** `publish_file` returns JSON. The model parses it into a file reference. The panel builds the link from the `/files/...` url and the dev proxy forwards `/api` to the LangGraph server.
+**Output files.** `publish_file` returns JSON. The model parses it into a file reference. The panel builds the link from the signed `/files/...` URL and the dev proxy forwards `/api` to the LangGraph server.
 
 **Input files.** Attachments go through an adapter that converts the file into a base64 `file` content block. The panel lists them from the user message's attachments.
 
@@ -172,7 +172,7 @@ src/components/
 **Before production.**
 
 - Replace the in-memory server with a persistent checkpointer and a real deployment; thread history then survives restarts.
-- Authenticate `/files` and scope outputs per user or thread.
+- Use durable object storage and configure the same `OUTPUT_FILE_SIGNING_KEY` across server instances.
 - Restrict the agent's filesystem backend and move skills to a read-only location.
 - Add unit tests for `buildRouteModel` and the stepper, and keep the scripted end-to-end run in CI.
 - Add an error boundary around the chat and panel, and show a retry when a stream fails.
@@ -190,7 +190,7 @@ The model follows how Claude loads skills and tools: a catalogue of names and de
 | Versions | Skills, tools and UI mappings are immutable once published. An agent profile revision is an immutable JSON of exact versions, prompt sections and questions. |
 | Status | draft, approved, deprecated, revoked. dev serves draft, approved and deprecated; uat and prod serve approved and deprecated; revoked is never served. |
 | Environment | Each environment pins one profile revision. Changing a pin changes new conversations with no restart (ETag resolve, Redis pub/sub invalidation, in-process fallback). |
-| Snapshot | A conversation keeps the revision it started on, stored in graph state. Each turn the agent checks status; if a pinned item was revoked it re-resolves. |
+| Snapshot | A conversation keeps the revision it started on, stored in graph state. Each turn the agent checks status; if a pinned item was revoked it re-resolves. The UI renders from that same conversation snapshot. |
 | Skills | Python wheels with a sha256 and an Ed25519 signature added at approval. The agent fetches lazily on first read of `/skill_cache/<id>/<ver>/SKILL.md`, verifies, and caches by hash. |
 | Tools | Come from MCP servers. The registry stores server URL, an allow-list of tool names and a digest of their definitions, so a changed definition is refused (rug-pull protection). Names and descriptions sit in the prompt; the schema binds after the agent calls `load_tool`. Results are wrapped as untrusted and capped at 64 KB. |
 | Tool UIs | The registry picks among components bundled in the app (`requirements-stepper`, `ask-user-card`, `hidden`). It never ships code to the browser, because that would be remote code execution in every user session. |
@@ -199,7 +199,7 @@ The model follows how Claude loads skills and tools: a catalogue of names and de
 
 The admin console at `/admin` registers and approves skills and tools, edits profile revisions, pins them per environment, and shows usage and the audit log. Buttons are hidden by role, but the server enforces every rule.
 
-**Verified.** 23 automated security checks pass (roles, two-person approval, immutability, signing, revoked items not served, MCP entry limits, size caps, audit tamper detection). A browser test ran the full flow: alice published 1.1.0, her approval was refused, bob approved, a new profile was pinned to dev, a new chat picked up v1.1.0 without a restart, and after bob revoked 1.0.0 an open chat re-pinned and finished.
+**Verified.** 30 automated security checks pass (roles, two-person approval, immutability, signing, revoked items not served, MCP entry limits, size caps, audit tamper detection, atomic audit writes and file access). A browser test ran the full flow: alice published 1.1.0, her approval was refused, bob approved, a new profile was pinned to dev, a new chat picked up v1.1.0 without a restart, and after bob revoked 1.0.0 an open chat re-pinned and finished.
 
 **Prototype versus production.**
 

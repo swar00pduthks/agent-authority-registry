@@ -9,10 +9,10 @@
 from pathlib import Path
 
 from starlette.applications import Starlette
-from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
-from starlette.staticfiles import StaticFiles
+from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.routing import Route
 
+from file_access import verify_file_url
 from registry_client import default_client
 
 OUTPUTS = Path(__file__).parent / "outputs"
@@ -34,4 +34,23 @@ async def agent_config(request):
     )
 
 
-app = Starlette(routes=[Route("/agent-config", agent_config), Mount("/files", app=StaticFiles(directory=OUTPUTS))])
+async def output_file(request):
+    path = request.path_params["path"]
+    target = (OUTPUTS / path).resolve()
+    if (
+        not verify_file_url(
+            path, request.query_params.get("signature", ""), request.query_params.get("expires", "")
+        )
+        or OUTPUTS.resolve() not in target.parents
+        or not target.is_file()
+    ):
+        return Response(status_code=404)
+    return FileResponse(target)
+
+
+app = Starlette(
+    routes=[
+        Route("/agent-config", agent_config),
+        Route("/files/{path:path}", output_file, methods=["GET", "HEAD"]),
+    ]
+)

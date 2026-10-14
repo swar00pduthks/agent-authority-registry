@@ -39,6 +39,8 @@ class RegistryClient:
         self._resolved: dict | None = None
         self._checked = 0.0
         self._stale = True
+        self._invalidation_generation = 0
+        self._generation_lock = threading.Lock()
         self._lock = threading.Lock()
         self.redis_mode = False
         if redis_url:
@@ -54,7 +56,9 @@ class RegistryClient:
             self.redis_mode = True
             for msg in sub.listen():
                 if msg["type"] == "message":
-                    self._stale = True
+                    with self._generation_lock:
+                        self._invalidation_generation += 1
+                        self._stale = True
         except Exception as e:
             self.redis_mode = False
             log.warning("registry events unavailable (%s); polling instead", e)
@@ -66,6 +70,8 @@ class RegistryClient:
             fresh = self._resolved is not None and not self._stale and (self.redis_mode or time.time() - self._checked < 5)
             if fresh:
                 return self._resolved  # type: ignore[return-value]
+            with self._generation_lock:
+                generation = self._invalidation_generation
             try:
                 headers = {"if-none-match": self._resolved["etag"]} if self._resolved else {}
                 r = self.http.get(f"/v1/agents/{self.agent}/resolve", params={"env": self.env}, headers=headers)
@@ -84,7 +90,9 @@ class RegistryClient:
                         raise RegistryError(f"registry unreachable and no last-good profile cached: {e}") from e
                     self._resolved = json.loads(good.read_text())
                 log.warning("using the last good profile (revision %s): %s", self._resolved.get("revision"), e)
-            self._checked, self._stale = time.time(), False
+            self._checked = time.time()
+            with self._generation_lock:
+                self._stale = generation != self._invalidation_generation
             return self._resolved  # type: ignore[return-value]
 
     def statuses(self, items: list[dict]) -> dict[tuple, str]:

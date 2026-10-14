@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import os
 import secrets
 import time
@@ -27,6 +28,7 @@ PERMS = {
     "admin": {"read", "usage", "publish", "approve", "admin"},
 }
 RATE_PER_MINUTE = int(os.getenv("REGISTRY_RATE_PER_MINUTE", "600"))
+log = logging.getLogger("registry.security")
 
 
 def new_token() -> str:
@@ -86,10 +88,14 @@ class RateLimiter:
         minute = int(time.time() // 60)
         if self.bus.redis:
             key = f"rl:{who}:{minute}"
-            n = self.bus.redis.incr(key)
-            if n == 1:
-                self.bus.redis.expire(key, 90)
-            return n <= RATE_PER_MINUTE
+            try:
+                n = self.bus.redis.incr(key)
+                if n == 1:
+                    self.bus.redis.expire(key, 90)
+                return n <= RATE_PER_MINUTE
+            except Exception as e:
+                log.warning("Redis rate limiting unavailable (%s); using in-process limiter", e)
+                self.bus.redis = None
         self.local = {k: v for k, v in self.local.items() if k[1] == minute}
         self.local[(who, minute)] = self.local.get((who, minute), 0) + 1
         return self.local[(who, minute)] <= RATE_PER_MINUTE

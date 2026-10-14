@@ -20,7 +20,7 @@ frontend/   React + Vite + assistant-ui, with the route panel
 | `recommend_path` | `agent.py` | Records the path, the reason and 4-6 requirement phrases |
 | Path steps | `backend/skills_src/*-path/SKILL.md` (published to the registry) | The agent reads the matching skill and publishes its steps with the built-in `write_todos` |
 | `[You]` / `[Agent]` prefixes | skills | Mark who does each step; the panel draws them differently |
-| `publish_file` | `agent.py`, `webapp.py` | The agent saves a deliverable under `/outputs/` and publishes it; `webapp.py` serves it at `/files`, so the panel can open and download it |
+| `publish_file` | `agent.py`, `webapp.py` | Each conversation saves deliverables in its own `/outputs/` directory; the panel opens and downloads them through signed, seven-day `/files` URLs |
 | File attachments | `frontend/src/lib/attachments.ts` | Attached files go to the agent as base64 `file` blocks (10 MB limit) |
 | Route panel | `frontend/src/components/panel/` and `lib/route.ts` | Four sections built from the thread's tool calls, with no separate state: **Plan**, **Output**, **Input**, **Skills and tools** |
 
@@ -99,7 +99,7 @@ npm run dev        # http://localhost:5173 (chat), http://localhost:5173/admin (
 
 Sign in to `/admin` with the tokens in `.registry_tokens.json`. Try: as alice publish low-code-path 1.1.0; as bob approve it, create a profile revision that uses it, approve and pin it to dev; start a new chat and see `low-code-path v1.1.0 · dev` in the panel.
 
-Tests: `python tests/test_registry_security.py` (23 checks).
+Tests: `python tests/test_registry_security.py` (30 checks).
 
 Preview the panel with static data: `/?demo=empty|discover|plan|done`.
 
@@ -109,7 +109,7 @@ Run these after the services are up (see "Run it"). Each check says what a pass 
 
 | Check | Command | Pass |
 | --- | --- | --- |
-| Registry security (no services needed) | `cd backend && python tests/test_registry_security.py` | `23/23 passed`. It uses its own temporary database. |
+| Registry security (no services needed) | `cd backend && python tests/test_registry_security.py` | `30/30 passed`. It uses its own temporary database. |
 | Frontend types and build | `cd frontend && npm ci && npm run build` | `tsc` prints nothing, then `built in ...s`. |
 | Registry is up | `curl -s localhost:8800/v1/health` | `{"ok":true,"bus":"redis",...}` (`"bus":"local"` without Redis). |
 | Agent is up | `curl -s localhost:2024/ok` | `{"ok":true}`. `curl -s localhost:2024/agent-config` returns the env, revision and UI map. |

@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { AssistantRuntimeProvider, useAui } from "@assistant-ui/react";
 import { useLangGraphRuntime } from "@assistant-ui/react-langgraph";
 import AdminApp from "./admin/AdminApp";
@@ -16,6 +16,41 @@ function Shell() {
   const config = useAgentConfig();
   const model = useRouteModel();
   const [open, setOpen] = useState(false);
+  const routeButton = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const trigger = routeButton.current;
+    panel.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        return;
+      }
+      if (event.key !== "Tab" || !panel.current) return;
+      const focusable = panel.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      );
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) {
+        event.preventDefault();
+      } else if (event.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panel.current)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      trigger?.focus();
+    };
+  }, [open]);
 
   const total = model.steps.length;
   const done = model.steps.filter((s) => s.status === "completed").length;
@@ -31,12 +66,12 @@ function Shell() {
 
   return (
     <div className="app" style={{ "--line": accentVar(model.path?.accent) } as CSSProperties}>
-      <main className="chat">
+      <main className="chat" inert={open}>
         <header className="chat-head">
           <span className="brand">AI Platform Guide</span>
           {config.revision != null && <span className="env-tag" title="Agent configuration from the registry">{config.env} · rev {config.revision}</span>}
           {model.path && <span className="path-tag">{model.path.label}</span>}
-          <button className="route-pill" onClick={() => setOpen(true)} aria-haspopup="dialog">
+          <button ref={routeButton} className="route-pill" onClick={() => setOpen(true)} aria-haspopup="dialog">
             Route{pill ? ` ${pill}` : ""}
           </button>
         </header>
@@ -44,7 +79,15 @@ function Shell() {
       </main>
 
       {open && <div className="scrim" onClick={() => setOpen(false)} />}
-      <aside className="panel" data-open={open || undefined} aria-label="Your route">
+      <aside
+        ref={panel}
+        className="panel"
+        data-open={open || undefined}
+        role={open ? "dialog" : undefined}
+        aria-modal={open || undefined}
+        aria-label="Your route"
+        tabIndex={open ? -1 : undefined}
+      >
         <RoutePanel
           model={model}
           onClose={() => setOpen(false)}

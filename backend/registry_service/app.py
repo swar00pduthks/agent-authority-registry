@@ -130,11 +130,12 @@ def _store_skill(r: Request, data: bytes, status: str):
         return err(f"invalid skill wheel: {e}", 422)
     if db.one("SELECT 1 FROM skill_versions WHERE skill_id=? AND version=?", (m["id"], m["version"])):
         return err(f"{m['id']} {m['version']} is already published; versions are immutable", 409)
-    db.run(
-        "INSERT INTO skill_versions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL)",
-        (m["id"], m["version"], status, m["label"], m["blurb"], m["accent"], m["description"], body, data, sha256(data), now(), actor(r)),
-    )
-    db.audit(actor(r), "publish", f"skill:{m['id']}@{m['version']}", {"status": status})
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO skill_versions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL)",
+            (m["id"], m["version"], status, m["label"], m["blurb"], m["accent"], m["description"], body, data, sha256(data), now(), actor(r)),
+        )
+        db.append_audit(conn, actor(r), "publish", f"skill:{m['id']}@{m['version']}", {"status": status})
     changed("skill", id=m["id"], version=m["version"])
     return JSONResponse({"id": m["id"], "version": m["version"], "status": status}, status_code=201)
 
@@ -175,11 +176,12 @@ async def publish_tool(r: Request):
             return err("spec.auth_env must name an environment variable, never hold a secret", 422)
     if db.one("SELECT 1 FROM tool_versions WHERE tool_id=? AND version=?", (b["id"], b["version"])):
         return err("already published; versions are immutable", 409)
-    db.run(
-        "INSERT INTO tool_versions VALUES (?,?,?,?,?,?,?,?)",
-        (b["id"], b["version"], "draft", b["kind"], b.get("description", ""), json.dumps(b.get("spec", {})), now(), actor(r)),
-    )
-    db.audit(actor(r), "publish", f"tool:{b['id']}@{b['version']}")
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO tool_versions VALUES (?,?,?,?,?,?,?,?)",
+            (b["id"], b["version"], "draft", b["kind"], b.get("description", ""), json.dumps(b.get("spec", {})), now(), actor(r)),
+        )
+        db.append_audit(conn, actor(r), "publish", f"tool:{b['id']}@{b['version']}")
     changed("tool", id=b["id"])
     return JSONResponse({"id": b["id"], "version": b["version"]}, status_code=201)
 
@@ -189,11 +191,12 @@ async def publish_ui(r: Request):
     b = await r.json()
     if db.one("SELECT 1 FROM ui_versions WHERE name=? AND version=?", (b["id"], b["version"])):
         return err("already published; versions are immutable", 409)
-    db.run(
-        "INSERT INTO ui_versions VALUES (?,?,?,?,?,?,?)",
-        (b["id"], b["version"], "draft", b["component"], b.get("description", ""), now(), actor(r)),
-    )
-    db.audit(actor(r), "publish", f"ui:{b['id']}@{b['version']}")
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO ui_versions VALUES (?,?,?,?,?,?,?)",
+            (b["id"], b["version"], "draft", b["component"], b.get("description", ""), now(), actor(r)),
+        )
+        db.append_audit(conn, actor(r), "publish", f"ui:{b['id']}@{b['version']}")
     changed("ui", id=b["id"])
     return JSONResponse({"id": b["id"], "version": b["version"]}, status_code=201)
 
@@ -216,11 +219,12 @@ async def set_status(r: Request):
         return err("you published this version, so someone else must approve it", 403)
     if row["status"] == "revoked":
         return err("a revoked version cannot change status; publish a new version", 409)
-    if status == "approved" and kind == "skills":
-        sig = signer.sign(vid, version, row["sha256"])
-        db.run("UPDATE skill_versions SET signature=?, approved_by=? WHERE skill_id=? AND version=?", (sig, actor(r), vid, version))
-    db.run(f"UPDATE {table} SET status=? WHERE {idcol}=? AND version=?", (status, vid, version))
-    db.audit(actor(r), "status", f"{kind}:{vid}@{version}", {"status": status})
+    with db.transaction() as conn:
+        if status == "approved" and kind == "skills":
+            sig = signer.sign(vid, version, row["sha256"])
+            conn.execute("UPDATE skill_versions SET signature=?, approved_by=? WHERE skill_id=? AND version=?", (sig, actor(r), vid, version))
+        conn.execute(f"UPDATE {table} SET status=? WHERE {idcol}=? AND version=?", (status, vid, version))
+        db.append_audit(conn, actor(r), "status", f"{kind}:{vid}@{version}", {"status": status})
     changed("status", kind=kind, id=vid, version=version, status=status)
     return JSONResponse({"id": vid, "version": version, "status": status})
 
@@ -270,16 +274,16 @@ async def create_revision(r: Request):
     agent = r.path_params["agent"]
     b = await r.json()
     config = b.get("config") or {}
-    if not db.one("SELECT 1 FROM agents WHERE id=?", (agent,)):
-        db.run("INSERT INTO agents VALUES (?,?)", (agent, agent))
     bad = _missing(config)
     if bad:
         return err("the profile references versions that are not registered", 422, missing=bad)
-    rid = db.run(
-        "INSERT INTO profile_revisions(agent_id, status, note, config, created_at, created_by) VALUES (?,?,?,?,?,?)",
-        (agent, "draft", b.get("note", ""), json.dumps(config), now(), actor(r)),
-    )
-    db.audit(actor(r), "revision", f"agent:{agent}#{rid}", {"note": b.get("note", "")})
+    with db.transaction() as conn:
+        conn.execute("INSERT OR IGNORE INTO agents VALUES (?,?)", (agent, agent))
+        rid = conn.execute(
+            "INSERT INTO profile_revisions(agent_id, status, note, config, created_at, created_by) VALUES (?,?,?,?,?,?)",
+            (agent, "draft", b.get("note", ""), json.dumps(config), now(), actor(r)),
+        ).lastrowid
+        db.append_audit(conn, actor(r), "revision", f"agent:{agent}#{rid}", {"note": b.get("note", "")})
     changed("revision", agent=agent, revision=rid)
     return JSONResponse({"id": rid}, status_code=201)
 
@@ -296,8 +300,9 @@ async def set_revision_status(r: Request):
     if status == "approved" and rev["created_by"] == actor(r):
         db.audit(actor(r), "denied", f"revision#{rid}", {"why": "self-approval"})
         return err("you created this revision, so someone else must approve it", 403)
-    db.run("UPDATE profile_revisions SET status=? WHERE id=?", (status, rid))
-    db.audit(actor(r), "status", f"revision#{rid}", {"status": status})
+    with db.transaction() as conn:
+        conn.execute("UPDATE profile_revisions SET status=? WHERE id=?", (status, rid))
+        db.append_audit(conn, actor(r), "status", f"revision#{rid}", {"status": status})
     changed("status", kind="revision", id=rid, status=status)
     return JSONResponse({"id": rid, "status": status})
 
@@ -329,11 +334,12 @@ async def pin_env(r: Request):
     blocked = _unservable(json.loads(rev["config"]), env)
     if blocked:
         return err(f"{env} cannot serve everything in revision #{rid}", 409, blocked=blocked)
-    db.run(
-        "INSERT INTO env_pins VALUES (?,?,?,?,?) ON CONFLICT(agent_id, env) DO UPDATE SET revision_id=excluded.revision_id, updated_at=excluded.updated_at, updated_by=excluded.updated_by",
-        (agent, env, rid, now(), actor(r)),
-    )
-    db.audit(actor(r), "pin", f"agent:{agent}/{env}", {"revision": rid})
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO env_pins VALUES (?,?,?,?,?) ON CONFLICT(agent_id, env) DO UPDATE SET revision_id=excluded.revision_id, updated_at=excluded.updated_at, updated_by=excluded.updated_by",
+            (agent, env, rid, now(), actor(r)),
+        )
+        db.append_audit(conn, actor(r), "pin", f"agent:{agent}/{env}", {"revision": rid})
     changed("pin", agent=agent, env=env, revision=rid)
     return JSONResponse({"agent": agent, "env": env, "revision": rid})
 
@@ -395,7 +401,7 @@ async def report_usage(r: Request):
     return JSONResponse({"ok": True})
 
 
-@needs("read")
+@needs("usage")
 async def list_usage(r: Request):
     rows = db.q("SELECT * FROM usage ORDER BY last_seen DESC LIMIT 100")
     for x in rows:
@@ -418,8 +424,9 @@ async def create_token(r: Request):
     if any(x not in ("reader", "agent", "publisher", "approver", "admin") for x in roles.split(",")):
         return err("unknown role")
     token = new_token()
-    db.run("INSERT INTO tokens(name, roles, token_hash, created_at, created_by) VALUES (?,?,?,?,?)", (b["name"], roles, hash_token(token), now(), actor(r)))
-    db.audit(actor(r), "token-create", b["name"], {"roles": roles})
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO tokens(name, roles, token_hash, created_at, created_by) VALUES (?,?,?,?,?)", (b["name"], roles, hash_token(token), now(), actor(r)))
+        db.append_audit(conn, actor(r), "token-create", b["name"], {"roles": roles})
     return JSONResponse({"name": b["name"], "roles": roles, "token": token, "note": "shown once"}, status_code=201)
 
 
@@ -430,8 +437,9 @@ async def list_tokens(r: Request):
 
 @needs("admin")
 async def revoke_token(r: Request):
-    db.run("UPDATE tokens SET revoked=1 WHERE name=?", (r.path_params["name"],))
-    db.audit(actor(r), "token-revoke", r.path_params["name"])
+    with db.transaction() as conn:
+        conn.execute("UPDATE tokens SET revoked=1 WHERE name=?", (r.path_params["name"],))
+        db.append_audit(conn, actor(r), "token-revoke", r.path_params["name"])
     return JSONResponse({"revoked": r.path_params["name"]})
 
 

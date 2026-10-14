@@ -9,6 +9,7 @@ pauses on every [You] step. Deliverables are saved under /outputs and published.
 import json
 import mimetypes
 import os
+import re
 from pathlib import Path
 
 from langchain.agents.middleware import TodoListMiddleware
@@ -16,8 +17,10 @@ from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
 from langchain_core.tools import tool
 from langchain.tools import ToolRuntime
+from langgraph.config import get_config
 from langgraph.types import interrupt
 
+from file_access import signed_file_url
 from registry_client import RegistryProfile, default_client
 
 ROOT = Path(__file__).parent
@@ -26,6 +29,18 @@ OUTPUTS = ROOT / "outputs"
 OUTPUTS.mkdir(exist_ok=True)
 
 CLIENT = default_client()
+
+
+class ThreadFilesystemBackend(FilesystemBackend):
+    def _resolve_path(self, key: str) -> Path:
+        if key in ("/outputs", "outputs") or key.startswith(("/outputs/", "outputs/")):
+            thread_id = str(get_config()["configurable"]["thread_id"])
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", thread_id):
+                raise ValueError("Invalid conversation ID")
+            prefix = "/outputs" if key.startswith("/") else "outputs"
+            key = f"{prefix}/{thread_id}{key[len(prefix):]}"
+        return super()._resolve_path(key)
+
 
 # Questions, prompt sections, skills, tools and UI mapping all come from the registry profile
 # this conversation pinned. Nothing about them is written in this file.
@@ -93,18 +108,24 @@ def publish_file(path: str) -> str:
 
     path is a virtual path under /outputs/, for example /outputs/summary.md.
     """
-    target = (ROOT / path.lstrip("/")).resolve()
-    outputs = OUTPUTS.resolve()
-    if outputs not in target.parents or not target.is_file():
+    thread_id = str(get_config()["configurable"]["thread_id"])
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", thread_id):
+        return "Error: this conversation has an invalid ID."
+    parts = Path(path).parts
+    if not parts or parts[0] != "/" or len(parts) < 3 or parts[1] != "outputs" or ".." in parts:
         return "Error: only existing files under /outputs/ can be published."
-    rel = target.relative_to(outputs).as_posix()
+    thread_root = (OUTPUTS / thread_id).resolve()
+    target = (thread_root.joinpath(*parts[2:])).resolve()
+    if thread_root not in target.parents or not target.is_file():
+        return "Error: only existing files under /outputs/ can be published."
+    rel = target.relative_to(OUTPUTS.resolve()).as_posix()
     return json.dumps(
         {
             "type": "file",
             "name": target.name,
             "mime": mimetypes.guess_type(target.name)[0] or "application/octet-stream",
             "size": target.stat().st_size,
-            "url": f"/files/{rel}",
+            "url": signed_file_url(rel),
         }
     )
 
@@ -116,7 +137,7 @@ agent = create_deep_agent(
     model=os.getenv("MODEL", "anthropic:claude-sonnet-4-5"),
     tools=TOOLS,
     system_prompt=BASE_PROMPT,
-        backend=FilesystemBackend(root_dir=str(ROOT), virtual_mode=True),
+        backend=ThreadFilesystemBackend(root_dir=str(ROOT), virtual_mode=True),
     # RegistryProfile fills in the skills list from the registry; this folder is where
     # a skill is unpacked, once verified, when the agent first reads it.
     # write_todos is not part of every deepagents version's default stack, so add it explicitly.

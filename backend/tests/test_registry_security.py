@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 tmp = Path(tempfile.mkdtemp())
 os.environ["REGISTRY_DB"] = str(tmp / "t.db")
@@ -14,6 +15,9 @@ from starlette.testclient import TestClient  # noqa: E402
 
 from registry_service import bootstrap  # noqa: E402
 from registry_service.app import app, db  # noqa: E402
+from registry_service.security import RateLimiter  # noqa: E402
+from file_access import signed_file_url  # noqa: E402
+from webapp import OUTPUTS, app as webapp  # noqa: E402
 
 bootstrap.main()
 T = json.loads((tmp / "tokens.json").read_text())
@@ -37,6 +41,8 @@ def check(name, cond):
 
 check("no token is rejected", req(None, "GET", "/v1/skills").status_code == 401)
 check("a wrong token is rejected", c.get("/v1/skills", headers={"authorization": "Bearer nope"}).status_code == 401)
+check("usage telemetry requires usage permission", req("reader", "GET", "/v1/usage").status_code == 403)
+check("agents can read usage telemetry", req("agent-guide", "GET", "/v1/usage").status_code == 200)
 check("a reader cannot publish", req("reader", "POST", "/v1/skills/compose", json=SKILL).status_code == 403)
 check("an agent cannot publish", req("agent-guide", "POST", "/v1/skills/compose", json=SKILL).status_code == 403)
 check("a publisher publishes a draft", req("alice", "POST", "/v1/skills/compose", json=SKILL).status_code == 201)
@@ -49,6 +55,43 @@ check("a revoked version cannot be revived", (
     req("bob", "PUT", "/v1/skills/demo-path/1.0.0/status", json={"status": "revoked"}).status_code == 200
     and req("bob", "PUT", "/v1/skills/demo-path/1.0.0/status", json={"status": "approved"}).status_code == 409))
 check("a revoked wheel is not served", req("agent-guide", "GET", "/v1/skills/demo-path/1.0.0/wheel").status_code == 410)
+check("a revoked skill body is not served", req("agent-guide", "GET", "/v1/skills/demo-path/1.0.0/body").status_code == 410)
+
+class BrokenRedis:
+    def incr(self, key):
+        raise ConnectionError("redis unavailable")
+
+
+class RateLimitBus:
+    redis = BrokenRedis()
+
+
+fallback = RateLimiter(RateLimitBus())
+check("rate limiting falls back after Redis fails", fallback.hit("agent") and fallback.bus.redis is None)
+
+audit_count = db.one("SELECT COUNT(*) AS n FROM audit")["n"]
+try:
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO agents VALUES (?,?)", ("rolled-back", "rolled-back"))
+        db.append_audit(conn, "test", "mutation", "agent:rolled-back")
+        raise RuntimeError("rollback test")
+except RuntimeError:
+    pass
+check(
+    "registry mutation and audit roll back together",
+    db.one("SELECT 1 FROM agents WHERE id='rolled-back'") is None
+    and db.one("SELECT COUNT(*) AS n FROM audit")["n"] == audit_count,
+)
+
+with tempfile.TemporaryDirectory(dir=OUTPUTS) as folder:
+    file_path = Path(folder) / "private.txt"
+    file_path.write_text("private")
+    relative = file_path.relative_to(OUTPUTS).as_posix()
+    url = signed_file_url(relative)
+    file_client = TestClient(webapp, base_url="http://agent")
+    file_route = urlsplit(url).path
+    check("signed conversation file URLs work", file_client.get(url).status_code == 200)
+    check("conversation files are not served without a signature", file_client.get(file_route).status_code == 404)
 
 tool = {"id": "t", "version": "1.0.0", "kind": "mcp", "spec": {"url": "http://169.254.169.254/mcp", "allow": ["x"]}}
 check("an MCP entry cannot target a metadata address", req("alice", "POST", "/v1/tools", json=tool).status_code == 422)

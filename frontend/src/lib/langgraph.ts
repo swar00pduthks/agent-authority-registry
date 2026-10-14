@@ -50,3 +50,10 @@ export const load = async (threadId: string) => {
   ) as LangGraphInterruptState[];
   return { messages: values.messages ?? [], interrupts };
 };
+
+export const loadThreadConfig = async (threadId: string) => {
+  const state = await client.threads.getState(threadId);
+  const registry = (state.values as { registry?: { env: string; revision: number; ui: Record<string, { component: string; version: string }> } }).registry;
+  if (!registry) return null;
+  return { env: registry.env, revision: registry.revision, ui: registry.ui };
+};

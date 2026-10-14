@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterator
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS skill_versions (
@@ -62,20 +64,35 @@ class DB:
             self.conn.commit()
             return cur.lastrowid or 0
 
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        with self.lock:
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield self.conn
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                raise
+
     def audit(self, actor: str, action: str, target: str, detail: dict | None = None) -> None:
         """Append to a hash chain: each row commits to the one before it, so edits or deletions are detectable."""
+        with self.transaction() as conn:
+            self.append_audit(conn, actor, action, target, detail)
+
+    def append_audit(
+        self, conn: sqlite3.Connection, actor: str, action: str, target: str, detail: dict | None = None
+    ) -> None:
         import hashlib
 
-        with self.lock:
-            last = self.conn.execute("SELECT hash FROM audit ORDER BY id DESC LIMIT 1").fetchone()
-            prev = last["hash"] if last else "genesis"
-            row = (now(), actor, action, target, json.dumps(detail or {}, sort_keys=True))
-            digest = hashlib.sha256((prev + "|".join(row)).encode()).hexdigest()
-            self.conn.execute(
-                "INSERT INTO audit(ts, actor, action, target, detail, prev, hash) VALUES (?,?,?,?,?,?,?)",
-                (*row, prev, digest),
-            )
-            self.conn.commit()
+        last = conn.execute("SELECT hash FROM audit ORDER BY id DESC LIMIT 1").fetchone()
+        prev = last["hash"] if last else "genesis"
+        row = (now(), actor, action, target, json.dumps(detail or {}, sort_keys=True))
+        digest = hashlib.sha256((prev + "|".join(row)).encode()).hexdigest()
+        conn.execute(
+            "INSERT INTO audit(ts, actor, action, target, detail, prev, hash) VALUES (?,?,?,?,?,?,?)",
+            (*row, prev, digest),
+        )
 
     def verify_audit(self) -> dict:
         import hashlib
