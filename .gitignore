@@ -1,0 +1,14 @@
+__pycache__/
+node_modules/
+dist/
+.env
+.venv/
+.langgraph_api/
+backend/registry.db*
+backend/registry.signing.key
+backend/.registry_tokens.json
+backend/registry_pubkey.pem
+backend/registry_cache/
+backend/skill_cache/
+backend/outputs/*
+!backend/outputs/.gitkeep

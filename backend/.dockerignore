@@ -1,0 +1,9 @@
+__pycache__
+.venv
+registry.db*
+registry.signing.key
+.registry_tokens.json
+registry_cache
+skill_cache
+.langgraph_api
+.env

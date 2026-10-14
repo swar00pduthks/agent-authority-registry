@@ -1,0 +1,50 @@
+.adm { min-height: 100%; background: var(--mist); }
+.adm-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 14px 24px; background: var(--paper); border-bottom: 1px solid var(--hair); position: sticky; top: 0; z-index: 2; }
+.adm-head h1 { margin: 0; font: 600 1.15rem var(--display); }
+.adm-head nav { display: flex; gap: 4px; }
+.adm-tab { padding: 6px 12px; border: 0; border-radius: 8px; background: none; color: var(--ink-2); font-weight: 500; }
+.adm-tab[aria-current] { background: var(--ink); color: var(--paper); }
+.adm-who { margin-left: auto; color: var(--ink-2); font-size: 0.86rem; }
+.adm-main { display: grid; gap: 20px; width: min(72rem, 100%); margin: 0 auto; padding: 24px; }
+.adm-panel { padding: 20px; border: 1px solid var(--hair); border-radius: 14px; background: var(--paper); overflow-x: auto; }
+.adm-panel > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.adm-panel h2 { margin: 0 0 12px; font: 600 1.05rem var(--display); }
+.adm-panel > header h2 { margin: 0; }
+.adm-h3 { margin: 12px 0 0; font: 600 0.95rem var(--display); }
+.adm-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.adm-table th { text-align: left; padding: 6px 10px; color: var(--ink-2); font-weight: 500; border-bottom: 1px solid var(--hair); }
+.adm-table td { padding: 9px 10px; border-bottom: 1px solid var(--hair); vertical-align: top; }
+.adm-table small { display: block; color: var(--ink-3); font-size: 0.78rem; }
+.adm-table code, .adm-login code { font-size: 0.82rem; }
+.row-actions { white-space: nowrap; text-align: right; }
+.row-actions .sm + .sm { margin-left: 6px; }
+.btn-ghost.sm { padding: 4px 10px; font-size: 0.82rem; }
+.chip-status { display: inline-block; padding: 2px 8px; border-radius: 99px; background: var(--mist); color: var(--ink-2); font-size: 0.78rem; font-weight: 500; }
+.chip-status[data-status="approved"] { color: var(--no-code); }
+.chip-status[data-status="draft"], .chip-status[data-status="deprecated"] { color: var(--low-code); }
+.chip-status[data-status="revoked"] { color: #c0392b; }
+.notice { margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: var(--mist); font-size: 0.88rem; }
+.notice[data-ok="true"] { color: var(--no-code); }
+.notice[data-ok="false"] { color: #c0392b; }
+.adm-form { display: grid; gap: 12px; max-width: 46rem; }
+.field { display: grid; gap: 4px; font-size: 0.84rem; color: var(--ink-2); }
+.field input, .field select, .field textarea, .pin-row select, .q-row input { padding: 8px 10px; border: 1px solid var(--hair); border-radius: 8px; background: transparent; color: var(--ink); font: inherit; }
+.field textarea { font-family: ui-monospace, monospace; font-size: 0.82rem; }
+.adm-note { margin: 0; color: var(--ink-3); font-size: 0.84rem; }
+.pins { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 12px; margin-bottom: 10px; }
+.pin-card { padding: 14px; border: 1px solid var(--hair); border-radius: 10px; }
+.pin-card h3 { margin: 0 0 4px; font: 600 1rem var(--display); }
+.pin-card p { margin: 0 0 10px; color: var(--ink-2); font-size: 0.88rem; }
+.pin-row { display: flex; gap: 8px; }
+.pin-row select { flex: 1; min-width: 0; }
+.q-row { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
+.pick { border: 1px solid var(--hair); border-radius: 10px; padding: 10px 14px; }
+.pick legend { padding: 0 6px; color: var(--ink-2); font-size: 0.84rem; }
+.pick-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 4px 0; font-size: 0.9rem; }
+.pick-row select { padding: 4px 8px; border: 1px solid var(--hair); border-radius: 6px; background: transparent; color: var(--ink); }
+.adm-login { display: grid; gap: 12px; width: min(26rem, calc(100% - 32px)); margin: 15vh auto; padding: 24px; border: 1px solid var(--hair); border-radius: 14px; background: var(--paper); }
+.adm-login h1 { margin: 0; font: 600 1.3rem var(--display); }
+.adm-login p { margin: 0; color: var(--ink-2); }
+.adm-login form { display: flex; gap: 8px; }
+.adm-login input { flex: 1; min-width: 0; padding: 9px 12px; border: 1px solid var(--hair); border-radius: 8px; background: transparent; color: var(--ink); }
+@media (max-width: 720px) { .adm-main { padding: 12px; } .adm-head { padding: 12px; } }

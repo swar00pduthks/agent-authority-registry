@@ -1,0 +1,66 @@
+# Local stack: Redis, registry, MCP demo server, agent, frontend.
+#   docker compose up --build            (scripted agent, no API key needed)
+#   LANGGRAPH_CONFIG=langgraph.json ANTHROPIC_API_KEY=sk-... docker compose up --build   (real model)
+# Open http://localhost:4173 (chat) and http://localhost:4173/admin (console).
+# Tokens for the console: docker compose exec registry cat /data/.registry_tokens.json
+x-backend: &backend
+  build: ./backend
+  volumes: [registry-data:/data]
+
+services:
+  redis:
+    image: redis:7-alpine
+
+  registry-init:
+    <<: *backend
+    environment:
+      REGISTRY_DB: /data/registry.db
+      REGISTRY_TOKENS: /data/.registry_tokens.json
+      MCP_URL: http://mcp:8810/mcp
+      TOOL_HOST_ALLOWLIST: mcp:8810
+    depends_on: [mcp]
+    # seed contacts the MCP server to pin its tool digest, so wait for its port first
+    command: >
+      sh -c "until python -c \"import socket;socket.create_connection(('mcp',8810),2)\"; do echo waiting for mcp; sleep 2; done;
+      python -m registry_service.bootstrap && python -m registry_service.seed"
+
+  registry:
+    <<: *backend
+    depends_on:
+      registry-init: {condition: service_completed_successfully}
+      redis: {condition: service_started}
+    environment:
+      REGISTRY_DB: /data/registry.db
+      REDIS_URL: redis://redis:6379/0
+      TOOL_HOST_ALLOWLIST: mcp:8810
+    command: uvicorn registry_service.app:app --host 0.0.0.0 --port 8800
+    ports: ["8800:8800"]
+
+  mcp:
+    <<: *backend
+    environment: {MCP_HOST: 0.0.0.0}
+    command: python mcp_servers/standards_server.py
+
+  agent:
+    <<: *backend
+    depends_on: [registry, mcp]
+    environment:
+      REGISTRY_URL: http://registry:8800
+      REDIS_URL: redis://redis:6379/0
+      SKILL_ENV: dev
+      TOOL_HOST_ALLOWLIST: mcp:8810
+      LANGGRAPH_CONFIG: ${LANGGRAPH_CONFIG:-langgraph.scripted.json}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    command: ./docker-entrypoint-agent.sh
+    ports: ["2024:2024"]
+
+  frontend:
+    build: ./frontend
+    depends_on: [agent, registry]
+    environment:
+      LANGGRAPH_URL: http://agent:2024
+      REGISTRY_URL: http://registry:8800
+    ports: ["4173:4173"]
+
+volumes:
+  registry-data:

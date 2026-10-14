@@ -1,0 +1,9 @@
+{
+  "id": "no-code-path",
+  "version": "1.0.0",
+  "kind": "path",
+  "label": "No-code",
+  "blurb": "Visual builder, no scripting",
+  "accent": "no-code",
+  "owner": "AI Platform"
+}

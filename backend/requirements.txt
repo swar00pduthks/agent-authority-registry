@@ -1,0 +1,10 @@
+deepagents
+langchain-anthropic
+langgraph-cli[inmem]
+mcp>=2.2
+httpx2
+redis
+uvicorn
+starlette
+cryptography
+pyyaml
