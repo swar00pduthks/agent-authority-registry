@@ -151,8 +151,12 @@ async def skill_wheel(r: Request):
 
 @needs("read")
 async def skill_body(r: Request):
-    row = db.one("SELECT body FROM skill_versions WHERE skill_id=? AND version=?", (r.path_params["id"], r.path_params["version"]))
-    return Response(row["body"], media_type="text/markdown") if row else err("not found", 404)
+    row = db.one("SELECT body, status FROM skill_versions WHERE skill_id=? AND version=?", (r.path_params["id"], r.path_params["version"]))
+    if not row:
+        return err("not found", 404)
+    if row["status"] == "revoked":
+        return err("this version is revoked", 410)
+    return Response(row["body"], media_type="text/markdown")
 
 
 @needs("publish")
